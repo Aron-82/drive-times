@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src https://nominatim.openstreetmap.org https://router.project-osrm.org https://routing.openstreetmap.de; base-uri 'none'; form-action 'none'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drive times</title>
+<style>
+:root{--bg:#f6f7f9;--fg:#1c1f24;--mut:#5d6672;--card:#fff;--line:#d8dce2;--acc:#0b63ce;--accfg:#fff;--warn:#b45309;--err:#b42318}
+@media (prefers-color-scheme:dark){:root{--bg:#14171b;--fg:#e6e8eb;--mut:#9aa4b0;--card:#1d2127;--line:#323843;--acc:#4c9aff;--accfg:#0a1220;--warn:#f0a35a;--err:#ff8a80}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:16px}
+h1{font-size:1.4rem;margin:0 0 12px}
+.row{display:flex;gap:8px;margin-bottom:8px}
+input[type=text],textarea{width:100%;min-height:44px;padding:8px 10px;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:8px}
+textarea{min-height:90px}
+button{min-height:44px;padding:8px 14px;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:8px;cursor:pointer}
+button.pri{background:var(--acc);color:var(--accfg);border-color:var(--acc);font-weight:600}
+button:disabled{opacity:.5}
+#status{min-height:1.4em;color:var(--mut);margin:4px 0}
+#status.err{color:var(--err)}
+#matched{color:var(--mut);font-size:.9rem;margin-bottom:8px;overflow-wrap:anywhere}
+#banner{background:var(--card);border:1px solid var(--warn);color:var(--warn);border-radius:8px;padding:8px 10px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:8px;margin:8px 0}
+th,td{padding:8px 6px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{font-size:.85rem;color:var(--mut);cursor:pointer;user-select:none}
+th.nosort{cursor:default}
+td.num,th.num{text-align:right;white-space:nowrap}
+td.idx{color:var(--mut);width:1%}
+td small{display:block;color:var(--mut);overflow-wrap:anywhere}
+td.nm{overflow-wrap:anywhere}
+a{color:var(--acc)}
+td a{display:inline-block;min-height:24px}
+details{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:12px 0}
+summary{cursor:pointer;min-height:32px;display:flex;align-items:center}
+.tools{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.sub{color:var(--mut);font-size:.9rem;margin:8px 0 4px}
+#geo-progress{display:flex;gap:8px;align-items:center;margin:8px 0;color:var(--mut)}
+#geo-progress[hidden]{display:none}
+.nf{border-top:1px solid var(--line);padding:8px 0}
+.nf .row{margin:4px 0 0}
+footer{color:var(--mut);font-size:.8rem;margin-top:20px}
+.warn{color:var(--warn)}
+</style>
+</head>
+<body>
+<main>
+<h1>Drive times</h1>
+<div id="banner" hidden>This browser won't save the list; use Export CSV</div>
+
+<div class="row">
+  <input id="from" type="text" placeholder="Address, or lat,lon" autocomplete="off" autocapitalize="off" enterkeyhint="go">
+  <button id="go" class="pri">Calculate</button>
+</div>
+<div id="status"></div>
+<div id="matched"></div>
+
+<div class="row">
+  <input id="filter" type="text" placeholder="Filter list" autocomplete="off">
+  <button id="copy">Copy table</button>
+</div>
+<table id="results">
+  <thead><tr>
+    <th class="num nosort">#</th>
+    <th data-k="name">Name</th>
+    <th data-k="dist" class="num">Distance</th>
+    <th data-k="time" class="num">Time</th>
+    <th class="nosort">Route</th>
+  </tr></thead>
+  <tbody></tbody>
+</table>
+
+<div id="geo-progress" hidden><span id="geo-text"></span><button id="geo-cancel">Cancel</button></div>
+<div id="notfound"></div>
+
+<details id="listpanel" open>
+  <summary>My list · <span id="list-count" style="margin-left:4px">0 addresses · 0 located · 0 not found</span></summary>
+
+  <div class="sub">Add one</div>
+  <div class="row"><input id="add-name" type="text" placeholder="Name (optional)" autocomplete="off"></div>
+  <div class="row"><input id="add-addr" type="text" placeholder="Address, or lat,lon" autocomplete="off"><button id="add-btn">Add</button></div>
+
+  <div class="sub">Import CSV (name;address;lat;lon, header optional)</div>
+  <textarea id="import-text" placeholder="Paste CSV text here" spellcheck="false"></textarea>
+  <div class="row" style="margin-top:8px">
+    <input id="import-file" type="file" accept=".csv,.txt,text/csv,text/plain" style="width:100%;min-height:44px">
+    <button id="import-btn">Import</button>
+  </div>
+
+  <div class="tools">
+    <button id="export-btn">Export CSV</button>
+    <button id="clear-btn">Clear list</button>
+  </div>
+
+</details>
+
+<footer>Times are typical free-flow estimates, no live traffic. Addresses you type are sent to OpenStreetMap Nominatim, coordinates to an OSRM routing server; your list stays in this browser. © OpenStreetMap contributors.</footer>
+</main>
+
+<script>
+(function(){
+'use strict';
+var KEY='drivetimes.list.v1', FKEY='drivetimes.from.v1';
+var NOMI='https://nominatim.openstreetmap.org/search';
+var OSRM=['https://router.project-osrm.org/table/v1/driving/','https://routing.openstreetmap.de/routed-car/table/v1/driving/'];
+var $=function(id){return document.getElementById(id)};
+var list=[], storageOk=true, results=[], fromPt=null, sortKey='time', sortDir=1;
+var geoRunning=false, geoCancel=false, nomiNext=0;
+
+function el(tag,props,kids){
+  var e=document.createElement(tag);
+  if(props){for(var k in props){ if(k==='text') e.textContent=props[k]; else e.setAttribute(k,props[k]); }}
+  (kids||[]).forEach(function(c){e.appendChild(typeof c==='string'?document.createTextNode(c):c)});
+  return e;
+}
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
+
+/* ---------- storage ---------- */
+function load(){
+  try{
+    var s=localStorage.getItem(KEY);
+    if(s){var a=JSON.parse(s); if(Array.isArray(a)) list=a.filter(function(x){return x&&typeof x==='object'}).map(normEntry);}
+  }catch(e){storageOk=false}
+  try{ localStorage.setItem('drivetimes.probe','1'); localStorage.removeItem('drivetimes.probe'); }catch(e){storageOk=false}
+  $('banner').hidden=storageOk;
+}
+function normEntry(x){
+  var o={name:String(x.name||''),address:String(x.address||''),lat:num(x.lat),lon:num(x.lon)};
+  if(x.nf) o.nf=1;
+  return o;
+}
+function save(){
+  try{localStorage.setItem(KEY,JSON.stringify(list))}catch(e){storageOk=false;$('banner').hidden=false}
+}
+function num(v){
+  if(v===null||v===undefined||v==='') return null;
+  var n=parseFloat(String(v).trim().replace(',','.'));
+  return isFinite(n)?n:null;
+}
+
+/* ---------- CSV ---------- */
+function detectDelim(line){
+  var q=false,c={'\t':0,';':0,',':0};
+  for(var i=0;i<line.length;i++){var ch=line[i]; if(ch==='"')q=!q; else if(!q&&c.hasOwnProperty(ch))c[ch]++;}
+  if(c['\t']>0) return '\t';
+  if(c[';']>0) return ';';
+  if(c[',']>0) return ',';
+  return ';';
+}
+function parseCSV(text){
+  text=text.replace(/^﻿/,'');
+  var first=text.split(/\r?\n/).filter(function(l){return l.trim()})[0]||'';
+  var d=detectDelim(first), rows=[], row=[], f='', q=false, i=0, n=text.length;
+  function endField(){row.push(f);f=''}
+  function endRow(){endField(); if(row.some(function(x){return x.trim()!==''})) rows.push(row); row=[]}
+  for(;i<n;i++){
+    var ch=text[i];
+    if(q){
+      if(ch==='"'){ if(text[i+1]==='"'){f+='"';i++} else q=false; }
+      else f+=ch;
+    }else if(ch==='"' && f===''){q=true}
+    else if(ch===d){endField()}
+    else if(ch==='\r'){ }
+    else if(ch==='\n'){endRow()}
+    else f+=ch;
+  }
+  if(f!==''||row.length) endRow();
+  return rows;
+}
+function rowsToEntries(rows){
+  if(!rows.length) return [];
+  var names=['name','address','lat','lon','lng','latitude','longitude'];
+  var h=rows[0].map(function(x){return x.trim().toLowerCase()});
+  var hasHeader=h.some(function(x){return names.indexOf(x)>=0});
+  var idx={name:0,address:1,lat:2,lon:3};
+  if(hasHeader){
+    idx={name:-1,address:-1,lat:-1,lon:-1};
+    h.forEach(function(x,i){
+      if(x==='name')idx.name=i; else if(x==='address')idx.address=i;
+      else if(x==='lat'||x==='latitude')idx.lat=i; else if(x==='lon'||x==='lng'||x==='longitude')idx.lon=i;
+    });
+    rows=rows.slice(1);
+  }
+  var out=[];
+  rows.forEach(function(r){
+    var g=function(k){return idx[k]>=0&&idx[k]<r.length?r[idx[k]].trim():''};
+    var name,address;
+    if(!hasHeader&&r.length===1){address=r[0].trim();name=address}
+    else{
+      address=g('address'); name=g('name');
+      if(!address&&name&&hasHeader&&idx.address<0){address=name}
+      if(!name)name=address;
+    }
+    var lat=num(g('lat')), lon=num(g('lon'));
+    if(lat===null||lon===null||Math.abs(lat)>90||Math.abs(lon)>180){lat=null;lon=null}
+    if(!address&&lat===null) return;
+    if(!address) address=lat+','+lon;
+    if(!name) name=address;
+    out.push({name:name,address:address,lat:lat,lon:lon});
+  });
+  return out;
+}
+function key(e){return e.address.trim().toLowerCase()}
+function addEntries(es){
+  var seen={}; list.forEach(function(e){seen[key(e)]=e});
+  var added=0;
+  es.forEach(function(e){
+    var k=key(e), ex=seen[k];
+    if(ex){ if(ex.lat===null&&e.lat!==null){ex.lat=e.lat;ex.lon=e.lon;delete ex.nf} return; }
+    list.push(e); seen[k]=e; added++;
+  });
+  save(); renderList(); checkPanel();
+  return added;
+}
+function decodeBuf(buf){
+  var s=new TextDecoder('utf-8').decode(buf);
+  if(s.indexOf('�')>=0) s=new TextDecoder('windows-1252').decode(buf);
+  return s;
+}
+function readFile(f){
+  return new Promise(function(res,rej){
+    var r=new FileReader();
+    r.onload=function(){res(decodeBuf(r.result))};
+    r.onerror=function(){rej(r.error)};
+    r.readAsArrayBuffer(f);
+  });
+}
+function csvField(v){
+  v=String(v===null||v===undefined?'':v);
+  return /[;"\r\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;
+}
+function exportCSV(){
+  var lines=['name;address;lat;lon'];
+  list.forEach(function(e){lines.push([e.name,e.address,e.lat===null?'':e.lat,e.lon===null?'':e.lon].map(csvField).join(';'))});
+  var blob=new Blob(['﻿'+lines.join('\r\n')+'\r\n'],{type:'text/csv;charset=utf-8'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download='addresses.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000);
+}
+
+/* ---------- Nominatim ---------- */
+async function nomiWait(){
+  var now=Date.now(), wait=Math.max(0,nomiNext-now);
+  nomiNext=Math.max(now,nomiNext)+1100;
+  if(wait) await sleep(wait);
+}
+async function geocode(q){
+  for(var attempt=0;attempt<4;attempt++){
+    await nomiWait();
+    try{
+      var r=await fetch(NOMI+'?q='+encodeURIComponent(q)+'&format=jsonv2&limit=1&accept-language=de');
+      if(r.status===429||r.status>=500){ if(attempt<3){await sleep(5000);continue} return {error:true}; }
+      if(!r.ok) return {error:true};
+      var a=await r.json();
+      if(!a.length) return null;
+      return {lat:parseFloat(a[0].lat),lon:parseFloat(a[0].lon),name:a[0].display_name};
+    }catch(e){
+      if(attempt<3){await sleep(5000);continue}
+      return {error:true};
+    }
+  }
+  return {error:true};
+}
+var COORD=/^\s*(-?\d{1,2}(?:\.\d+)?)\s*[,; ]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/;
+function parseCoord(s){
+  var m=COORD.exec(s); if(!m) return null;
+  var lat=parseFloat(m[1]), lon=parseFloat(m[2]);
+  if(Math.abs(lat)>90||Math.abs(lon)>180) return null;
+  return {lat:lat,lon:lon};
+}
+async function geoRun(){
+  if(geoRunning) return;
+  geoRunning=true; geoCancel=false;
+  var todo=list.filter(function(e){return e.lat===null&&!e.nf});
+  var total=todo.length, done=0;
+  $('geo-progress').hidden=false;
+  for(var i=0;i<todo.length;i++){
+    if(geoCancel) break;
+    var e=todo[i];
+    $('geo-text').textContent='Located '+done+'/'+total;
+    var c=parseCoord(e.address);
+    var r=c?c:await geocode(e.address);
+    if(geoCancel&&!r) break;
+    if(r&&!r.error){e.lat=r.lat;e.lon=r.lon;delete e.nf}
+    else e.nf=1;
+    done++; save(); renderList();
+  }
+  $('geo-text').textContent=(geoCancel?'Cancelled · ':'')+'Located '+done+'/'+total;
+  geoRunning=false;
+  setTimeout(function(){ if(!geoRunning) $('geo-progress').hidden=true },geoCancel?1500:800);
+}
+
+/* ---------- list UI ---------- */
+function renderList(){
+  var n=list.length, m=list.filter(function(e){return e.lat!==null}).length, k=list.filter(function(e){return e.lat===null&&e.nf}).length;
+  $('list-count').textContent=n+' addresses · '+m+' located · '+k+' not found';
+  var box=$('notfound'); box.textContent='';
+  list.forEach(function(e){
+    if(!(e.lat===null&&e.nf)) return;
+    var inp=el('input',{type:'text','aria-label':'Corrected address or lat,lon'}); inp.value=e.address;
+    var btn=el('button',{text:'Retry'});
+    btn.addEventListener('click',function(){ retry(e,inp.value) });
+    box.appendChild(el('div',{class:'nf'},[
+      el('div',null,[el('span',{class:'warn',text:'⚠ '}),el('strong',{text:e.name}),el('small',{text:' not found'})]),
+      el('div',{class:'row'},[inp,btn])
+    ]));
+  });
+}
+function retry(e,val){
+  val=val.trim(); if(!val) return;
+  var c=parseCoord(val);
+  if(c){e.lat=c.lat;e.lon=c.lon;delete e.nf;e.address=val}
+  else{e.address=val;delete e.nf}
+  save(); renderList();
+  if(e.lat===null) geoRun();
+}
+
+/* ---------- formatting ---------- */
+function fmtDist(m){var k=m/1000;return k<100?k.toFixed(1)+' km':Math.round(k)+' km'}
+function fmtTime(s){
+  var m=Math.round(s/60); if(m<60) return m+' min';
+  var h=Math.floor(m/60), mm=m%60; return h+' h '+(mm<10?'0':'')+mm+' min';
+}
+
+/* ---------- routing ---------- */
+async function fetchTable(coords){
+  var path=coords.map(function(c){return c.lon+','+c.lat}).join(';')+'?sources=0&annotations=duration,distance';
+  for(var h=0;h<OSRM.length;h++){
+    var ctl=new AbortController(), t=setTimeout(function(){ctl.abort()},20000);
+    try{
+      var r=await fetch(OSRM[h]+path,{signal:ctl.signal});
+      clearTimeout(t);
+      if(!r.ok) continue;
+      var j=await r.json();
+      if(j.code==='Ok') return j;
+    }catch(e){clearTimeout(t)}
+  }
+  return null;
+}
+async function calculate(){
+  var val=$('from').value.trim();
+  if(!val){setStatus('Enter a start address.',true);return}
+  try{localStorage.setItem(FKEY,val)}catch(e){}
+  $('go').disabled=true; $('matched').textContent='';
+  try{
+    var c=parseCoord(val);
+    if(!c){
+      setStatus('Looking up address…');
+      var g=await geocode(val);
+      if(!g||g.error){setStatus(g?'Address lookup failed; try again later.':'Address not found.',true);return}
+      c=g; $('matched').textContent='Matched: '+g.name;
+    }
+    fromPt={lat:c.lat,lon:c.lon};
+    var dests=list.filter(function(e){return e.lat!==null});
+    results=dests.map(function(e){return {e:e,dur:null,dist:null,warn:false}});
+    if(!dests.length){setStatus('The list has no located addresses.',true);renderResults();return}
+    var chunks=Math.ceil(dests.length/99), fails=0;
+    for(var ci=0;ci<chunks;ci++){
+      setStatus('Routing '+(ci+1)+'/'+chunks+'…');
+      var part=results.slice(ci*99,ci*99+99);
+      var j=await fetchTable([fromPt].concat(part.map(function(r){return r.e})));
+      if(!j){fails++;continue}
+      var srcWarn=j.sources&&j.sources[0]&&j.sources[0].distance>1000;
+      part.forEach(function(r,i){
+        var d=j.durations[0][i+1], m=j.distances?j.distances[0][i+1]:null;
+        if(d!==null&&d!==undefined){r.dur=d;r.dist=m}
+        var w=j.destinations&&j.destinations[i+1]&&j.destinations[i+1].distance>1000;
+        r.warn=!!(w||srcWarn);
+      });
+    }
+    renderResults();
+    if(fails) setStatus('Routing failed for '+fails+' of '+chunks+' request(s); some rows show –.',true);
+    else setStatus(results.length+' addresses from '+(c.name?'matched place':'your coordinates')+'.');
+  }catch(e){
+    setStatus('Error: '+e.message,true);
+  }finally{$('go').disabled=false}
+}
+function setStatus(t,err){var s=$('status');s.textContent=t;s.className=err?'err':''}
+
+function sortedRows(){
+  var f=$('filter').value.trim().toLowerCase();
+  var rows=results.filter(function(r){return !f||(r.e.name+' '+r.e.address).toLowerCase().indexOf(f)>=0});
+  var k=sortKey;
+  rows.sort(function(a,b){
+    if(k==='name') return sortDir*a.e.name.localeCompare(b.e.name,'de');
+    var av=k==='dist'?a.dist:a.dur, bv=k==='dist'?b.dist:b.dur;
+    if(av===null&&bv===null) return 0;
+    if(av===null) return 1;
+    if(bv===null) return -1;
+    return sortDir*(av-bv);
+  });
+  return rows;
+}
+function renderResults(){
+  var tb=$('results').tBodies[0]; tb.textContent='';
+  sortedRows().forEach(function(r,i){
+    var tr=el('tr');
+    tr.appendChild(el('td',{class:'idx',text:String(i+1)}));
+    tr.appendChild(el('td',{class:'nm'},[r.e.name,el('small',{text:r.e.address})]));
+    tr.appendChild(el('td',{class:'num',text:r.dist===null?'–':fmtDist(r.dist)}));
+    var tt=el('td',{class:'num',text:r.dur===null?'–':fmtTime(r.dur)});
+    if(r.warn){tt.appendChild(document.createTextNode(' '));tt.appendChild(el('span',{class:'warn',title:'Address is far from a drivable road; check it',text:'⚠'}))}
+    tr.appendChild(tt);
+    var td=el('td');
+    if(fromPt&&r.dur!==null){
+      td.appendChild(el('a',{href:'https://www.google.com/maps/dir/?api=1&origin='+fromPt.lat+','+fromPt.lon+'&destination='+r.e.lat+','+r.e.lon+'&travelmode=driving',target:'_blank',rel:'noopener',text:'Route'}));
+    }else td.textContent='–';
+    tr.appendChild(td);
+    tb.appendChild(tr);
+  });
+}
+function copyTable(){
+  var lines=sortedRows().map(function(r){
+    return [r.e.name,r.e.address,r.dist===null?'':(r.dist/1000).toFixed(1),r.dur===null?'':Math.round(r.dur/60)].join('\t');
+  });
+  var txt=['Name\tAddress\tkm\tminutes'].concat(lines).join('\n');
+  function fallback(){
+    var ta=el('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    var ok=false; try{ok=document.execCommand('copy')}catch(e){}
+    ta.remove(); setStatus(ok?'Table copied.':'Copy failed.',!ok);
+  }
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(function(){setStatus('Table copied.')},fallback);
+  }else fallback();
+}
+
+/* ---------- wiring ---------- */
+$('go').addEventListener('click',calculate);
+$('from').addEventListener('keydown',function(ev){if(ev.key==='Enter'){ev.preventDefault();calculate()}});
+$('filter').addEventListener('input',renderResults);
+$('copy').addEventListener('click',copyTable);
+$('geo-cancel').addEventListener('click',function(){geoCancel=true});
+Array.prototype.forEach.call(document.querySelectorAll('th[data-k]'),function(th){
+  th.addEventListener('click',function(){
+    var k=th.getAttribute('data-k');
+    if(sortKey===k) sortDir=-sortDir; else {sortKey=k;sortDir=1}
+    renderResults();
+  });
+});
+$('add-btn').addEventListener('click',function(){
+  var a=$('add-addr').value.trim(), nm=$('add-name').value.trim();
+  if(!a) return;
+  var c=parseCoord(a);
+  addEntries([{name:nm||a,address:a,lat:c?c.lat:null,lon:c?c.lon:null}]);
+  $('add-addr').value=''; $('add-name').value='';
+  geoRun();
+});
+$('import-btn').addEventListener('click',async function(){
+  var f=$('import-file').files[0], text=$('import-text').value;
+  try{ if(f) text=await readFile(f); }catch(e){setStatus('Could not read the file.',true);return}
+  if(!text.trim()) return;
+  var es=rowsToEntries(parseCSV(text));
+  var added=addEntries(es);
+  $('import-text').value=''; $('import-file').value='';
+  setStatus('Imported '+es.length+' rows, '+added+' new.');
+  geoRun();
+});
+$('export-btn').addEventListener('click',exportCSV);
+$('clear-btn').addEventListener('click',function(){
+  if(!confirm('Delete the whole list from this browser?')) return;
+  geoCancel=true; list=[]; results=[]; save(); renderList(); renderResults(); checkPanel();
+});
+function checkPanel(){ $('listpanel').open=list.length===0 }
+
+load();
+try{var lf=localStorage.getItem(FKEY); if(lf) $('from').value=lf}catch(e){}
+renderList(); checkPanel(); renderResults();
+})();
+</script>
+</body>
+</html>

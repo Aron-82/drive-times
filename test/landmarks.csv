@@ -1,0 +1,12 @@
+name;address;lat;lon
+Augsburg Rathaus;Rathausplatz, 86150 Augsburg;48.3689;10.8978
+Nürnberg Hauptmarkt;Hauptmarkt, 90403 Nürnberg;49.4539;11.0775
+Stuttgart Hbf;Arnulf-Klett-Platz, 70173 Stuttgart;48.7840;9.1829
+Frankfurt Römerberg;Römerberg, 60311 Frankfurt;50.1106;8.6821
+Leipzig Hbf;Willy-Brandt-Platz, 04109 Leipzig;51.3454;12.3813
+Berlin Brandenburger Tor;Pariser Platz, 10117 Berlin;52.5163;13.3777
+Hamburg Rathaus;Rathausmarkt, 20095 Hamburg;53.5503;9.9922
+Köln Dom;Domkloster, 50667 Köln;50.9413;6.9583
+Dresden Frauenkirche;Neumarkt, 01067 Dresden;51.0517;13.7416
+Bremen Marktplatz;Am Markt, 28195 Bremen;53.0759;8.8077
+Kölner Dom (geocode test);Domkloster 4, 50667 Köln;;
